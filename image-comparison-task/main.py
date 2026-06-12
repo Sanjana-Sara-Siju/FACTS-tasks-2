@@ -10,8 +10,8 @@ apiKey = os.environ["MISTRAL_API_KEY"]
 model = "mistral-large-latest"
 client = Mistral(api_key = apiKey)
 
-img1 = "fabric1.jpg"
-img2 = "fabric2.jpg"
+img1 = "fabric3.png"
+img2 = "fabric4.jpg"
 
 print("Encoding the images...")
 
@@ -33,6 +33,7 @@ messages = [
                     "Analyze these two fabric images from Al Kilani Fabrics. "
                     "Compare them closely regarding their color and texture. "
                     "Based on the visual assessment, give an estimated similarity percentage (0-100%) "
+                    "Keep the colour and texture similarity separate."
                 )
             },
             {
