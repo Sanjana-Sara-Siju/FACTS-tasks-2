@@ -10,8 +10,8 @@ apiKey = os.environ["MISTRAL_API_KEY"]
 model = "mistral-large-latest"
 client = Mistral(api_key = apiKey)
 
-img1 = "1493-Sydney (13).jpg"
-img2 = "4187-Sydney (17).jpg"
+img1 = "fabric1.jpg"
+img2 = "fabric2.jpg"
 
 print("Encoding the images...")
 
