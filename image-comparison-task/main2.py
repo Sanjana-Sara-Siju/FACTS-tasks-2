@@ -19,8 +19,8 @@ client = Mistral(api_key = apiKey)
 processor = ViTImageProcessor.from_pretrained('google/vit-base-patch16-224')
 vit_model = ViTModel.from_pretrained('google/vit-base-patch16-224')
 
-img1_path = "fabric3.png"
-img2_path = "fabric4.jpg"
+img1_path = "fabric1.jpg"
+img2_path = "fabric2.jpg"
 
 print(f"\nAnalyzing {img1_path} and {img2_path} with Hugging Face...")
 
