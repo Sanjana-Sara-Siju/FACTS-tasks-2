@@ -1,0 +1,165 @@
+<!-- we use JavaScript to upload the file without reloading the page -->
+<!-- so that the user stays on the same page -->
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IMAGE UPLOAD AND SIMILARITY SEARCH</title>
+    <style>
+        /* CSS Styling */
+        body {
+            font-family: 'Futura', sans-serif;
+            background-color: #ffffff;
+            color: #783191;
+            padding: 40px;
+            max-width: 800px;
+            margin: auto;
+        }
+
+        h2 {
+            color: #783191;
+            border-bottom: 2px solid #783191;
+            padding-bottom: 10px;
+        }
+
+        button {
+            background-color: #783191;
+            color: #ffffff;
+            border: none;
+            padding: 10px 20px;
+            font-size: 16px;
+            font-family: 'Futura', sans-serif;
+            cursor: pointer;
+            border-radius: 5px;
+            margin-top: 10px;
+        }
+
+        button:hover {
+            opacity: 0.9;
+        }
+
+        input[type="file"] {
+            font-family: 'Futura', sans-serif;
+            margin-top: 10px;
+        }
+
+        hr {
+            border: 1px solid #783191;
+            margin: 30px 0;
+        }
+
+        
+        .result-box {
+            border: 2px solid #783191;
+            padding: 15px;
+            margin-bottom: 15px;
+            border-radius: 5px;
+            background-color: #fcf9fd; 
+        }
+    </style>
+</head>
+<body>
+
+    <h2>Upload a fabric sample to search:</h2>
+    <!-- opens File Explorer -->
+    <input type = "file" id = "fileInput" accept = "image/*"> 
+    <button onclick = "uploadFile()">Search!</button>
+    <p id = "uploadStatus"></p>
+
+
+    <h2>Recommendations :-</h2>
+    <!-- a container holding all the image previews and text -->
+    <div id = "resultsSection" style = "display: none;"> 
+        
+        <div class = "result-box" style = "text-align: center;">
+            <h3>Your Uploaded Sample</h3>
+            <img id = "imagePreview" src = "" alt = "Uploaded Fabric Preview" style = "max-width: 100%; max-height: 250px; border-radius: 5px; border: 1px solid #783191; margin-top: 10px;">
+        </div>
+
+        <!-- for image preview wrapper  -->
+        <div class = "result-box">
+            <h3>Closest Colour Match</h3>
+            <!-- empty image tag waiting for JS to give it a file path -->
+            <img id = "colorMatchImg" src = "" alt = "Colour Match Preview" style = "max-width: 100%; max-height: 200px; border-radius: 5px; margin-bottom: 15px; border: 1px solid #783191;">
+            <p><strong>Serial Number: </strong> <span id = "colorSerial"></span></p>
+            <p><strong>Confidence: </strong> <span id = "colorConf"></span></p>
+        </div>
+
+        <div class = "result-box">
+            <h3>Closest Texture Match</h3>
+            <img id = "textureMatchImg" src = "" alt = "Texture Match Preview" style = "max-width: 100%; max-height: 200px; border-radius: 5px; margin-bottom: 15px; border: 1px solid #783191;">
+            <p><strong>Serial Number: </strong> <span id = "textureSerial"></span></p>
+            <p><strong>Confidence: </strong> <span id = "textureConf"></span></p>
+        </div>
+
+    </div>
+    
+    <script>
+        // file uploads rely on network requests
+        // network requests are asynchronous, meaning the browser needs to pause execution 
+        // until the server finishes receiving and processing the file.
+        // Using "async" allows to use "await" later, which prevents function from moving 
+        // forward until file upload successfully completes.
+        async function uploadFile() {
+            const fileInput = document.getElementById('fileInput');
+            const uploadStatus = document.getElementById('uploadStatus');
+            const resultsSection = document.getElementById('resultsSection');
+
+            if (fileInput.files.length === 0) // strict equality 
+            {
+                alert("Please select an image first..."); // alerts user if they click "Search!" w/o uploading anything
+                return;
+            }
+
+            const file = fileInput.files[0]; // extracts very 1st file 
+            const formData = new FormData(); // creates a special object that bundles binary data into an HTTP request                                                                             
+            formData.append("file", file); // adds file package into formData 
+
+            uploadStatus.innerText = "Searching database...";
+            resultsSection.style.display = "none"; // Hide previous results if uploading a second time
+
+            try {
+                // fetch API used to make async HTTP requests to retrieve/send data across a network
+                const response = await fetch('/search', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json(); // unpacks raw JSON returned into JS dict object
+
+                if (data.error) {
+                    uploadStatus.innerText = "Error: " + data.error;
+                } else {
+                    uploadStatus.innerText = "Successfully processed and matched!";
+
+                    // creating a local URL for the uploaded image and assigning it to the preview tag
+                    const previewImage = document.getElementById('imagePreview');
+                    // grabbing the image user just uploaded & displays it immediately
+                    previewImage.src = URL.createObjectURL(file);
+
+                    // injecting the returned JSON data into the HTML span tags
+                    document.getElementById('colorSerial').innerText = data.color_match_serial;
+                    document.getElementById('colorConf').innerText = data.color_match_confidence;
+                    
+                    document.getElementById('textureSerial').innerText = data.texture_match_serial;
+                    document.getElementById('textureConf').innerText = data.texture_match_confidence;
+
+                    // dynamically updating the source paths for the database matches
+                    document.getElementById('colorMatchImg').src = `/static/processed_pics/${data.color_match_serial}.jpg`;
+                    document.getElementById('textureMatchImg').src = `/static/processed_pics/${data.texture_match_serial}.jpg`;
+
+                    // unhiding results section
+                    resultsSection.style.display = "block"; 
+                }
+
+            } catch (error) {
+                uploadStatus.innerText = "An error occurred during upload or database search.";
+                console.error(error);
+            }
+        }
+    </script>
+
+</body>
+</html>
