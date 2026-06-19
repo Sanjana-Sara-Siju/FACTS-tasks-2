@@ -6,96 +6,139 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>IMAGE UPLOAD AND SIMILARITY SEARCH</title>
+    <title>Al Kilani Fabrics - Visual Search</title>
+
+    <!-- Bootstrap 5 CSS CDN -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+
+
     <style>
         /* CSS Styling */
+
         body {
-            font-family: 'Futura', sans-serif;
-            background-color: #ffffff;
-            color: #783191;
-            padding: 40px;
-            max-width: 800px;
-            margin: auto;
+            font-family: 'Poppins', sans-serif;
+            background-color: #f8f9fa; 
         }
-
-        h2 {
-            color: #783191;
-            border-bottom: 2px solid #783191;
-            padding-bottom: 10px;
-        }
-
-        button {
-            background-color: #783191;
-            color: #ffffff;
-            border: none;
-            padding: 10px 20px;
-            font-size: 16px;
-            font-family: 'Futura', sans-serif;
-            cursor: pointer;
-            border-radius: 5px;
-            margin-top: 10px;
-        }
-
-        button:hover {
-            opacity: 0.9;
-        }
-
-        input[type="file"] {
-            font-family: 'Futura', sans-serif;
-            margin-top: 10px;
-        }
-
-        hr {
-            border: 1px solid #783191;
-            margin: 30px 0;
-        }
-
         
-        .result-box {
-            border: 2px solid #783191;
-            padding: 15px;
-            margin-bottom: 15px;
-            border-radius: 5px;
-            background-color: #fcf9fd; 
+        h1, h2, h3, h4, h5, h6, .card-title, .fw-bold {
+            font-family: 'Montserrat', sans-serif;
         }
+
+        .text-brand { color: #783191; }
+        .bg-brand { background-color: #783191; color: white; }
+        
+        .btn-brand {
+            background-color: #783191;
+            color: white;
+            font-family: 'Montserrat', sans-serif; 
+            text-transform: uppercase; 
+            letter-spacing: 1px;
+            transition: all 0.2s ease-in-out;
+        }
+        
+        .btn-brand:hover {
+            background-color: #5d2570; /* darker purple for hover state */
+            color: white;
+        }
+        
+        /* subtle lift effect for result cards */
+        .result-card { transition: transform 0.2s; }
+        .result-card:hover { transform: translateY(-5px); box-shadow: 0 10px 20px rgba(120, 49, 145, 0.15); }
+        
+        /* image constraints */
+        .img-preview { object-fit: cover; height: 250px; width: 100%; border-radius: 6px; }
+
     </style>
 </head>
 <body>
 
-    <h2>Upload a fabric sample to search:</h2>
-    <!-- opens File Explorer -->
-    <input type = "file" id = "fileInput" accept = "image/*"> 
-    <button onclick = "uploadFile()">Search!</button>
-    <p id = "uploadStatus"></p>
-
-
-    <h2>Recommendations :-</h2>
-    <!-- a container holding all the image previews and text -->
-    <div id = "resultsSection" style = "display: none;"> 
+    <div class="container py-5">
         
-        <div class = "result-box" style = "text-align: center;">
-            <h3>Your Uploaded Sample</h3>
-            <img id = "imagePreview" src = "" alt = "Uploaded Fabric Preview" style = "max-width: 100%; max-height: 250px; border-radius: 5px; border: 1px solid #783191; margin-top: 10px;">
+        <!-- Header section -->
+        <div class="text-center mb-5">
+            <h1 class="text-brand fw-bold">Al Kilani Fabrics</h1>
+            <p class="text-muted">Visual Similarity Search</p>
         </div>
 
-        <!-- for image preview wrapper  -->
-        <div class = "result-box">
-            <h3>Closest Colour Match</h3>
-            <!-- empty image tag waiting for JS to give it a file path -->
-            <img id = "colorMatchImg" src = "" alt = "Colour Match Preview" style = "max-width: 100%; max-height: 200px; border-radius: 5px; margin-bottom: 15px; border: 1px solid #783191;">
-            <p><strong>Serial Number: </strong> <span id = "colorSerial"></span></p>
-            <p><strong>Confidence: </strong> <span id = "colorConf"></span></p>
+        <!-- Upload section -->
+        <div class="row justify-content-center mb-5">
+            <div class="col-md-8 col-lg-6">
+                <div class="card shadow-sm border-0 rounded-4">
+                    <div class="card-body p-4 text-center">
+                        <h4 class="card-title text-brand mb-4">Upload a fabric sample to search:</h4>
+                        
+                        <!-- Standard Bootstrap file input -->
+                        <div class="mb-4 text-start">
+                            <label for="fileInput" class="form-label text-muted fw-bold">Select Fabric Image</label>
+                            <input class="form-control form-control-lg" type="file" id="fileInput" accept="image/*" style="border: 2px solid #e9ecef;">
+                        </div>
+                        
+                        <button class="btn btn-brand w-100 py-2 fw-bold" onclick="uploadFile()">Search!</button>
+                        
+                        <!-- Status alert -->
+                        <div id="uploadStatus" class="alert alert-info mt-3 d-none" role="alert"></div>
+                    </div>
+                </div>
+            </div>
         </div>
 
-        <div class = "result-box">
-            <h3>Closest Texture Match</h3>
-            <img id = "textureMatchImg" src = "" alt = "Texture Match Preview" style = "max-width: 100%; max-height: 200px; border-radius: 5px; margin-bottom: 15px; border: 1px solid #783191;">
-            <p><strong>Serial Number: </strong> <span id = "textureSerial"></span></p>
-            <p><strong>Confidence: </strong> <span id = "textureConf"></span></p>
+        <!-- Results section (hidden by default) -->
+        <div id="resultsSection" class="d-none">
+            <h3 class="text-brand border-bottom border-brand pb-2 mb-4">Database matches identified..</h3>
+            
+            <!-- Bootstrap Grid: 3 columns on desktop, stacks on mobile -->
+            <div class="row g-4">
+                
+                <!-- Uploaded Image -->
+                <div class="col-md-4">
+                    <div class="card h-100 shadow-sm border-0 result-card">
+                        <div class="card-header bg-white border-0 pt-4 pb-0 text-center">
+                            <h5 class="card-title text-muted">Your uploaded sample</h5>
+                        </div>
+                        <div class="card-body text-center">
+                            <img id="imagePreview" src="" alt="Uploaded Sample" class="img-preview mb-3 shadow-sm border">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Color match -->
+                <div class="col-md-4">
+                    <div class="card h-100 shadow-sm border-0 result-card" style="border-top: 5px solid #783191 !important;">
+                        <div class="card-header bg-white border-0 pt-4 pb-0 text-center">
+                            <h5 class="card-title text-brand">Closest Color Match</h5>
+                        </div>
+                        <div class="card-body text-center">
+                            <img id="colorMatchImg" src="" alt="Color Match" class="img-preview mb-3 shadow-sm">
+                            <div class="p-2 bg-light rounded">
+                                <p class="mb-1"><strong>Serial Number:</strong> <span id="colorSerial" class="text-brand fs-5 fw-bold"></span></p>
+                                <p class="mb-0 text-muted small">Confidence: <span id="colorConf" class="fw-bold"></span></p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Texture match -->
+                <div class="col-md-4">
+                    <div class="card h-100 shadow-sm border-0 result-card" style="border-top: 5px solid #783191 !important;">
+                        <div class="card-header bg-white border-0 pt-4 pb-0 text-center">
+                            <h5 class="card-title text-brand">Closest Texture Match</h5>
+                        </div>
+                        <div class="card-body text-center">
+                            <img id="textureMatchImg" src="" alt="Texture Match" class="img-preview mb-3 shadow-sm">
+                            <div class="p-2 bg-light rounded">
+                                <p class="mb-1"><strong>Serial Number:</strong> <span id="textureSerial" class="text-brand fs-5 fw-bold"></span></p>
+                                <p class="mb-0 text-muted small">Confidence: <span id="textureConf" class="fw-bold"></span></p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
         </div>
 
     </div>
-    
+
+
     <script>
         // file uploads rely on network requests
         // network requests are asynchronous, meaning the browser needs to pause execution 
@@ -118,7 +161,8 @@
             formData.append("file", file); // adds file package into formData 
 
             uploadStatus.innerText = "Searching database...";
-            resultsSection.style.display = "none"; // Hide previous results if uploading a second time
+            uploadStatus.className = "alert alert-info mt-3"; // status alert  
+            resultsSection.classList.add("d-none"); // Hide previous results if uploading a second time
 
             try {
                 // fetch API used to make async HTTP requests to retrieve/send data across a network
@@ -151,15 +195,18 @@
                     document.getElementById('textureMatchImg').src = `/static/processed_pics/${data.texture_match_serial}.jpg`;
 
                     // unhiding results section
-                    resultsSection.style.display = "block"; 
-                }
+                    resultsSection.classList.remove("d-none");                }
 
             } catch (error) {
                 uploadStatus.innerText = "An error occurred during upload or database search.";
+                uploadStatus.className = "alert alert-danger mt-3";
                 console.error(error);
             }
         }
     </script>
+
+    <!-- Bootstrap 5 JS Bundle -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 
 </body>
 </html>
