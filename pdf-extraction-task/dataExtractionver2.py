@@ -9,7 +9,7 @@ from mistralai.client import Mistral
 # LOADING API KEY
 load_dotenv() 
 apiKey = os.getenv("MISTRAL_API_KEY")
-model = "mistral-large-latest"
+model = "mistral-small-latest"
 client = Mistral(api_key = apiKey)
 
 pdf_folder = "PDFs"
@@ -56,6 +56,12 @@ Please structure your JSON output in an easy-to-read and understandable format.
         ],
         response_format = {"type": "json_object"} # forces the model to return valid JSON
     )
+
+        # PRINTING TOKEN USAGE 
+        prompt_tokens = response.usage.prompt_tokens
+        completion_tokens = response.usage.completion_tokens
+        total_tokens = response.usage.total_tokens
+        print(f"Tokens Used --> Prompt: {prompt_tokens} | Output: {completion_tokens} | Total: {total_tokens}")
 
 # CONVERTING RESPONSE STRING BACK INTO PYTHON 
         extracted_data = json.loads(response.choices[0].message.content)
