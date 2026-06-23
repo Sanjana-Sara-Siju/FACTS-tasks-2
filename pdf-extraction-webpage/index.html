@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DATA EXTRACTION FROM PDF</title>
+    <!-- Bootstrap -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+
+    <style>
+        body {
+            background-color: #121212; 
+            color: #e0e0e0;
+        }
+        
+        .card {
+            background-color: #484856; 
+            color: #ffffff;
+        }
+
+        .card-header {
+            background-color: #2a2a35 !important; 
+            border-bottom: 1px solid #3a3a45;
+        }
+
+        .form-control {
+            background-color: #2a2a35;
+            color: #ffffff;
+            border: 1px solid #444;
+        }
+
+        .form-control::file-selector-button {
+            background-color: #3a3a45;
+            color: #ffffff;
+        }
+
+        
+        .form-control:hover:not(:disabled):not([readonly])::file-selector-button {
+            background-color: #4a4a55 !important;
+            color: #ffffff !important;
+            cursor: pointer;
+            transition: background-color 0.2s ease-in-out;
+        }
+
+        .form-control:focus {
+            background-color: #32323e;
+            color: #ffffff;
+            border-color: #0d6efd;
+            box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25);
+        }
+
+        .text-muted {
+            color: #a0a0a0 !important;
+        }
+    </style>
+</head>
+
+
+
+<body>
+
+    <div class = "container mt-5">
+        <div class = "row justify-content-center">
+            <div class = "col-md-8">
+                
+                <div class = "card shadow-lg border-0 rounded-3">
+                    <div class = "card-header py-3 rounded-top">
+                        <h4 class = "mb-0">PDF Data Extractor</h4>
+                    </div>
+                    
+                    <div class = "card-body p-4">
+                        <p class = "text-muted mb-4">Select your PDFs to extract details: </p>
+                        
+                        <form action = "/extract" method="post" enctype="multipart/form-data">
+                            
+                            <div class = "mb-4">
+                                <label for = "pdfFiles" class = "form-label fw-bold">Upload File(s)</label>
+                                <input class = "form-control form-control-lg" type = "file" id = "pdfFiles" name = "files" accept = ".pdf" multiple required>
+                            </div>
+                            
+                            <div class = "d-grid">
+                                <button type = "submit" class = "btn btn-primary btn-lg">Extract Data!</button>
+                            </div>
+                            
+                        </form>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+<script>
+        const form = document.querySelector('form');
+        const btn = document.querySelector('button[type="submit"]');
+
+        form.addEventListener('submit', async (e) => {
+            // stopping the browser from redirecting
+            e.preventDefault(); 
+
+            // changing the button to act as the status indicator 
+            const originalText = btn.textContent;
+            btn.textContent = "Extracting... Please wait";
+            btn.disabled = true; // prevents double clicks
+
+            try {
+                // sending the files to FastAPI backend invisibly
+                const response = await fetch('/extract', {
+                    method: 'POST',
+                    body: new FormData(form)
+                });
+                
+                if (response.ok) {
+                    // success --> turns button green
+                    btn.textContent = "Success! Saved to MongoDB";
+                    btn.classList.replace("btn-primary", "btn-success");
+                    form.reset(); // clears file input
+                } else {
+                    // handling server errors
+                    btn.textContent = "Extraction Failed";
+                    btn.classList.replace("btn-primary", "btn-danger");
+                }
+            } catch (error) {
+                // handling connection errors
+                btn.textContent = "Connection Error";
+                btn.classList.replace("btn-primary", "btn-danger");
+            }
+
+            // resetting the button back to default state after 4 secs
+            setTimeout(() => {
+                btn.textContent = originalText;
+                btn.classList.remove("btn-success", "btn-danger");
+                btn.classList.add("btn-primary");
+                btn.disabled = false;
+            }, 4000);
+        });
+    </script>
+
+</body>
+</html>
