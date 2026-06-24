@@ -6,7 +6,8 @@ from mistralai.client import Mistral
 from pymongo import MongoClient
 from fastapi import FastAPI, UploadFile, File
 from fastapi.responses import HTMLResponse 
-
+import io # to handle the byte streams
+          # it lets Python treat raw memory like a physical file
 
 # LOADING API KEY
 load_dotenv() 
@@ -14,6 +15,10 @@ apiKey = os.getenv("MISTRAL_API_KEY")
 mongoUri = os.getenv("MONGO_URI")
 model = "mistral-small-latest"
 client = Mistral(api_key = apiKey)
+
+# SETTING UP FOLDER
+backup_folder = "PDFs"
+os.makedirs(backup_folder, exist_ok = True) # creates folder if it doesn't exist 
 
 # INITIALIZING MONGODB CONNECTION
 print("Connecting to MongoDB...")
@@ -39,9 +44,18 @@ async def extract_data(files: list[UploadFile] = File(...)):
     for file in files:
         print(f"\n--- Processing {file.filename} ---")
 
+        # reading raw bytes into memory 
+        pdf_bytes = await file.read()
+
+        # saving backup to hard drive
+        backup_path = os.path.join(backup_folder, file.filename)
+        with open(backup_path, "wb") as backup_file:
+            backup_file.write(pdf_bytes)
+    
 
     # EXTRACTING TEXT FROM PDF
-        reader = PdfReader(file.file)
+    # wrapping the bytes in io.BytesIO so PdfReader treats it like an open file 
+        reader = PdfReader(io.BytesIO(pdf_bytes))
         pdf_text = ""
         for page in reader.pages:
             extracted = page.extract_text()
@@ -85,6 +99,5 @@ Please structure your JSON output in an easy-to-read and understandable format.
         results.append(file.filename) 
 
 
-
-print("\nAll PDFs processed and uploaded to MongoDB successfully!")
+    print("\nAll PDFs processed and uploaded to MongoDB successfully!")
 
