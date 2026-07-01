@@ -16,7 +16,7 @@ try:
     )
     cursor = conn.cursor()
     
-    cursor.execute("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'stock_master'")
+    cursor.execute("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'purchase_details'")
     
     print("\n--- COLUMN NAMES ---")
     for row in cursor.fetchall():
