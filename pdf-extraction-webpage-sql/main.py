@@ -10,12 +10,14 @@ import io # to handle the byte streams
           # it lets Python treat raw memory like a physical file
 import pymssql
 
+# IMPORTING PROMPT FROM SEPARATE FILE
+from prompt import EXTRACTION_PROMPT
 
 # LOADING API KEY
 load_dotenv() 
 apiKey = os.getenv("MISTRAL_API_KEY")
 mongoUri = os.getenv("MONGO_URI")
-model = "mistral-small-latest"
+model = "mistral-large-latest"
 client = Mistral(api_key = apiKey)
 
 # SETTING UP FOLDER
@@ -26,7 +28,7 @@ os.makedirs(backup_folder, exist_ok = True) # creates folder if it doesn't exist
 print("Connecting to MongoDB...")
 mongo_client = MongoClient(mongoUri)
 db = mongo_client["JSON_PDF_database"]    # The name of your new database
-collection = db["sales_invoices"]        # The name of the collection (like a table)
+collection = db["extracted_pdfs"]        # The name of the collection (like a table)
 
 # INITIALIZING WEB SERVER
 app = FastAPI()
@@ -41,6 +43,9 @@ async def serve_frontend():
 @app.post("/extract")
 async def extract_data(files: list[UploadFile] = File(...)):
     results = []
+
+    # security block
+    blocked = ['delete', 'update', 'drop', 'grant', 'alter', 'create', 'insert', 'revoke', 'truncate', 'merge', 'exec']
 
     # loop through the uploaded files 
     for file in files:
@@ -65,39 +70,8 @@ async def extract_data(files: list[UploadFile] = File(...)):
                 pdf_text += extracted + "\n"
 
 
-        prompt = f"""
-You are an expert data analyst. Extract all relevant details from the following document and return them strictly in a well-formatted JSON object. 
-If a field is empty, return null for that field. Always wrap numbers in quotes so they are stored as strings.
-
-Document Text: 
-{pdf_text}
-
-- The 'customer_name' will be used to search our 'party_master' database table.
-- The 'item_name' inside the 'items' list will be used to search our 'stock_master' database table.
-Extract these names exactly as they appear in the document so they can be matched accurately.
-
-You MUST use the exact keys provided in the template below. Do not create nested objects for the customer or seller. If a field is not found in the document, return null for that field.
-### EXPECTED JSON FORMAT:
-{{
-    "invoice_number": "value here or null",
-    "order_number": "value here or null",
-    "customer_name": "name of the buyer or company that is purchasing",
-    "seller_name": "value here or null",
-    "total_amount": "value here or null",
-    "source_pdf_filename": "value here or null",
-    "items": [
-        {{
-            "item_name": "name of the stock or product here",
-            "quantity": "value here or null",
-            "unit_price": "value here or null"
-        }}
-    ],
-    "additional_details": {{
-        // You may put any extra extracted data here
-    }}
-}}
-
-"""
+        # INJECTING PDF TEXT INTO THE IMPORTED PROMPT
+        prompt = EXTRACTION_PROMPT.format(pdf_text = pdf_text)
 
 
 # CALLING MISTRAL API 
@@ -123,10 +97,7 @@ You MUST use the exact keys provided in the template below. Do not create nested
 # addition: adding filename as a new key-value pair to the dict Mistral created
         extracted_data["source_pdf_filename"] = file.filename
 
-        # linear SQL Database Enrichment 
-        party_name_from_pdf = extracted_data.get("customer_name", "") 
         
-    
         try:
             # opening 1 connection for entire document
             sql_conn = pymssql.connect(
@@ -138,47 +109,79 @@ You MUST use the exact keys provided in the template below. Do not create nested
                 login_timeout = 5
             )
             sql_cursor = sql_conn.cursor(as_dict = True)
-            
-            # fetching party (customer/vendor) data
-            if party_name_from_pdf:
-                print(f"Searching party_master for: {party_name_from_pdf}")
-                party_query = "SELECT PARTYMST_DOCNO, PARTYMST_DESC FROM party_master WHERE PARTYMST_DESC LIKE %s"
-                sql_cursor.execute(party_query, (f"%{party_name_from_pdf}%",))
-                party_result = sql_cursor.fetchone()
-                
-                if party_result:
-                    extracted_data["facts_party_code"] = party_result["PARTYMST_DOCNO"]
-                    extracted_data["facts_party_desc"] = party_result["PARTYMST_DESC"]
-                else:
-                    extracted_data["facts_party_code"] = "NOT FOUND"
-                    extracted_data["facts_party_desc"] = "NOT FOUND"
 
-            # looping and fetching stock data for each item Mistral found
-            items_list = extracted_data.get("items", [])
-            for item in items_list:
-                item_name = item.get("item_name", "")
-                
-                if item_name:
-                    print(f"Searching stock_master for: {item_name}")
-                    stock_query = "SELECT STKMST_DOCNO, STKMST_DESC FROM stock_master WHERE STKMST_DESC LIKE %s"
-                    sql_cursor.execute(stock_query, (f"%{item_name}%",))
-                    stock_result = sql_cursor.fetchone()
+            # processing AI-generated party query
+            party_query = extracted_data.get("party_sql_query", "")
+
+            if party_query:
+                is_safe = True
+
+                # applying SQL security checks
+                for word in blocked:
+                    if word in party_query.lower():
+                        print(f"Warning! Operation '{word}' not allowed. Blocking party query.")
+                        is_safe = False
+                        break
+                if 'select *' in party_query.lower() or 'select*' in party_query.lower():
+                    print("Warning! SELECT * operation not allowed. Blocking party query.")
+                    is_safe = False
+
+                if is_safe:
+                    print(f"Executing party query: {party_query}")
+                    sql_cursor.execute(party_query)
+                    party_result = sql_cursor.fetchone()
                     
-                    if stock_result:
-                        item["facts_stock_code"] = stock_result["STKMST_DOCNO"]
-                        item["facts_stock_desc"] = stock_result["STKMST_DESC"]
+                    if party_result:
+                        extracted_data["facts_party_code"] = party_result["PARTYMST_DOCNO"]
+                        extracted_data["facts_party_desc"] = party_result["PARTYMST_DESC"]
                     else:
-                        item["facts_stock_code"] = "NOT FOUND"
-                        item["facts_stock_desc"] = "NOT FOUND"
+                        extracted_data["facts_party_code"] = "NOT FOUND"
+                        extracted_data["facts_party_desc"] = "NOT FOUND"
+                else:
+                    extracted_data["facts_party_code"] = "BLOCKED FOR SECURITY"
+            
+
+            # Processing AI-generated stock queries
+            items_list = extracted_data.get("items") or [] # to handle when there are no items
+            for item in items_list:
+                stock_query = item.get("stock_sql_query", "")
+                
+                if stock_query:
+                    is_safe = True
+                    
+                    # applying SQL security checks 
+                    for word in blocked:
+                        if word in stock_query.lower():
+                            print(f"Warning! Operation '{word}' not allowed. Blocking stock query.")
+                            is_safe = False
+                            break
+                    if 'select *' in stock_query.lower() or 'select*' in stock_query.lower():
+                        print("Warning! SELECT * operation not allowed. Blocking stock query.")
+                        is_safe = False
+
+                    if is_safe:
+                        print(f"Executing stock query: {stock_query}")
+                        sql_cursor.execute(stock_query)
+                        stock_result = sql_cursor.fetchone()
+                        
+                        if stock_result:
+                            item["facts_stock_code"] = stock_result["STKMST_DOCNO"]
+                            item["facts_stock_desc"] = stock_result["STKMST_DESC"]
+                        else:
+                            item["facts_stock_code"] = "NOT FOUND"
+                            item["facts_stock_desc"] = "NOT FOUND"
+                    else:
+                        item["facts_stock_code"] = "BLOCKED FOR SECURITY"
 
         except Exception as e:
             print(f"Database enrichment failed: {e}")
             extracted_data["sql_enrichment_error"] = str(e)
             
         finally:
-            if 'sql_conn' in locals():
+            if sql_conn is not None:
                 sql_conn.close()
-                print("SQL Connection closed.")
+                print("SQL connection closed.")
+
 
 
 # INSERTING DIRECTLY INTO MONGODB
@@ -198,9 +201,8 @@ async def search_database(query: str):
     search_filter = {
         "$or": [ # $or --> logical OR operation
             {"source_pdf_filename": {"$regex": query, "$options": "i"}},
-            {"invoice_number": {"$regex": query, "$options": "i"}}, 
-            {"order_number": {"$regex": query, "$options": "i"}}, 
-            {"customer_name": {"$regex": query, "$options": "i"}},   
+            {"document_number": {"$regex": query, "$options": "i"}}, 
+            {"external_party_name": {"$regex": query, "$options": "i"}},   
         ]
     }
 
