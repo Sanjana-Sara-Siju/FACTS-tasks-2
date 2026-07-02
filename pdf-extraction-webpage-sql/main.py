@@ -11,7 +11,7 @@ import io # to handle the byte streams
 import pymssql
 
 # IMPORTING PROMPT FROM SEPARATE FILE
-from prompt import EXTRACTION_PROMPT
+from prompt import EXTRACTION_PROMPT, ITEM_MAPPING_PROMPT
 
 # LOADING API KEY
 load_dotenv() 
@@ -60,8 +60,8 @@ async def extract_data(files: list[UploadFile] = File(...)):
             backup_file.write(pdf_bytes)
     
 
-    # EXTRACTING TEXT FROM PDF
-    # wrapping the bytes in io.BytesIO so PdfReader treats it like an open file 
+        # EXTRACTING TEXT FROM PDF
+        # wrapping the bytes in io.BytesIO so PdfReader treats it like an open file 
         reader = PdfReader(io.BytesIO(pdf_bytes))
         pdf_text = ""
         for page in reader.pages:
@@ -69,21 +69,19 @@ async def extract_data(files: list[UploadFile] = File(...)):
             if extracted:
                 pdf_text += extracted + "\n"
 
-
         # INJECTING PDF TEXT INTO THE IMPORTED PROMPT
         prompt = EXTRACTION_PROMPT.format(pdf_text = pdf_text)
 
-
-# CALLING MISTRAL API 
+        # CALLING MISTRAL API 
         print("Sending text to Mistral AI for extraction...")
         response = client.chat.complete(
-        model = model, 
-        messages = [
-            {"role": "system", "content": "You are an assistant that strictly outputs JSON."},
-            {"role": "user", "content": prompt}
-        ],
-        response_format = {"type": "json_object"} # forces the model to return valid JSON
-    )
+            model = model, 
+            messages = [
+                {"role": "system", "content": "You are an assistant that strictly outputs JSON."},
+                {"role": "user", "content": prompt}
+            ],
+            response_format = {"type": "json_object"} # forces the model to return valid JSON
+        )
 
         # PRINTING TOKEN USAGE 
         prompt_tokens = response.usage.prompt_tokens
@@ -91,12 +89,11 @@ async def extract_data(files: list[UploadFile] = File(...)):
         total_tokens = response.usage.total_tokens
         print(f"Tokens Used --> Prompt: {prompt_tokens} | Output: {completion_tokens} | Total: {total_tokens}")
 
-# CONVERTING RESPONSE STRING BACK INTO PYTHON 
+        # CONVERTING RESPONSE STRING BACK INTO PYTHON 
         extracted_data = json.loads(response.choices[0].message.content)
 
-# addition: adding filename as a new key-value pair to the dict Mistral created
+        # addition: adding filename as a new key-value pair to the dict Mistral created
         extracted_data["source_pdf_filename"] = file.filename
-
         
         try:
             # opening 1 connection for entire document
@@ -140,38 +137,93 @@ async def extract_data(files: list[UploadFile] = File(...)):
                 else:
                     extracted_data["facts_party_code"] = "BLOCKED FOR SECURITY"
             
-
-            # Processing AI-generated stock queries
-            items_list = extracted_data.get("items") or [] # to handle when there are no items
-            for item in items_list:
-                stock_query = item.get("stock_sql_query", "")
+            # FUZZY MATCHING (RAG) FOR ITEMS 
+            party_code = extracted_data.get("facts_party_code")
+            history_query_template = extracted_data.get("history_sql_query") or extracted_data.get("purchase_history_sql_template", "")
+            
+            # only looking up history if its a valid client 
+            if party_code and party_code not in ["NOT FOUND", "BLOCKED FOR SECURITY"] and history_query_template:
+                print(f"Fetching purchase history for client: {party_code}")
                 
-                if stock_query:
-                    is_safe = True
+                # injecting the real data 
+                history_query = history_query_template.replace("[PARTY_CODE]", f"{party_code}")
+                
+                # security check on history query
+                is_history_safe = True
+                for word in blocked:
+                    if word in history_query.lower():
+                        is_history_safe = False
+                        break
+                
+                if is_history_safe and 'select *' not in history_query.lower():
+                    sql_cursor.execute(history_query)
+                    history_results = sql_cursor.fetchall()
                     
-                    # applying SQL security checks 
-                    for word in blocked:
-                        if word in stock_query.lower():
-                            print(f"Warning! Operation '{word}' not allowed. Blocking stock query.")
-                            is_safe = False
-                            break
-                    if 'select *' in stock_query.lower() or 'select*' in stock_query.lower():
-                        print("Warning! SELECT * operation not allowed. Blocking stock query.")
-                        is_safe = False
-
-                    if is_safe:
-                        print(f"Executing stock query: {stock_query}")
-                        sql_cursor.execute(stock_query)
-                        stock_result = sql_cursor.fetchone()
-                        
-                        if stock_result:
-                            item["facts_stock_code"] = stock_result["STKMST_DOCNO"]
-                            item["facts_stock_desc"] = stock_result["STKMST_DESC"]
-                        else:
-                            item["facts_stock_code"] = "NOT FOUND"
-                            item["facts_stock_desc"] = "NOT FOUND"
+                    # formatting the data for Mistral 
+                    # Mistral can't read a Python list so this code puts the output into a readable string of text 
+                    if history_results:
+                        history_text = "\n".join([str(row) for row in history_results])
                     else:
-                        item["facts_stock_code"] = "BLOCKED FOR SECURITY"
+                        history_text = "No previous purchase history found for this client."
+
+                    # LINE TO DEBUG:
+                    print(f"\n--- WHAT THE DB FOUND FOR {party_code} ---\n{history_text}\n-----------------------------------\n")
+
+                    # PDF items
+                    items_list = extracted_data.get("items") or []
+                    
+                    for item in items_list:
+                        raw_item_name = item.get("item_name", "")
+                        
+                        if raw_item_name:
+                            print(f"Fuzzy Matching AI mapping for: '{raw_item_name}'...")
+                            
+                            # the new prompt
+                            mapping_prompt = ITEM_MAPPING_PROMPT.format(
+                                extracted_item=raw_item_name,
+                                history_list=history_text
+                            )
+                            
+                            mapping_response = client.chat.complete(
+                                model="mistral-small-latest",
+                                messages=[
+                                    {"role": "system", "content": "You strictly output JSON."},
+                                    {"role": "user", "content": mapping_prompt}
+                                ],
+                                response_format = {"type": "json_object"}
+                            )
+                            
+                            # converting Mistral's response back into a Python dict
+                            mapped_data = json.loads(mapping_response.choices[0].message.content)
+                            item["facts_stock_code"] = mapped_data.get("facts_stock_code", "NOT FOUND")
+                            item["facts_stock_desc"] = mapped_data.get("facts_stock_desc", "NOT FOUND")
+
+                            # OPTION 2 --> GOING BACK TO STOCK_MASTER
+                            alt_query_template = extracted_data.get("fallback_sql_query", "")
+                            
+                            if item["facts_stock_code"] == "NOT FOUND" and alt_query_template:
+                                print(f"Not in history. Executing alternate query for: {raw_item_name}")
+                                
+                                # swapping placeholder with the actual item name 
+                                alt_query = alt_query_template.replace("[ITEM_NAME]", raw_item_name)
+                                
+                                # running through security check
+                                is_alt_safe = True
+                                for word in blocked:
+                                    if word in alt_query.lower():
+                                        is_alt_safe = False
+                                        break
+                                
+                                if is_alt_safe and 'select *' not in alt_query.lower():
+                                    sql_cursor.execute(alt_query)
+                                    alt_result = sql_cursor.fetchone()
+                                    
+                                    if alt_result:
+                                        print("Match found in stock_master ..")
+                                        item["facts_stock_code"] = alt_result["STKMST_DOCNO"]
+                                        item["facts_stock_desc"] = alt_result["STKMST_DESC"]
+                                    else:
+                                        print("Item not found in history or stock_master.")
 
         except Exception as e:
             print(f"Database enrichment failed: {e}")
@@ -182,14 +234,12 @@ async def extract_data(files: list[UploadFile] = File(...)):
                 sql_conn.close()
                 print("SQL connection closed.")
 
-
-
-# INSERTING DIRECTLY INTO MONGODB
+        # INSERTING DIRECTLY INTO MONGODB
         insert_result = collection.insert_one(extracted_data)
         results.append(file.filename) 
 
-
     print("\nAll PDFs processed and uploaded to MongoDB successfully!")
+    return {"status": "success", "processed_files": results}
 
 #  ROUTE --> HANDLING DOCUMENT SEARCHES
 @app.get("/search")
@@ -214,3 +264,50 @@ async def search_database(query: str):
     
     return {"count": len(results_list), "data": results_list}
 
+
+#             # Processing AI-generated stock queries
+#             items_list = extracted_data.get("items") or [] # to handle when there are no items
+#             for item in items_list:
+#                 stock_query = item.get("stock_sql_query", "")
+                
+#                 if stock_query:
+#                     is_safe = True
+                    
+#                     # applying SQL security checks 
+#                     for word in blocked:
+#                         if word in stock_query.lower():
+#                             print(f"Warning! Operation '{word}' not allowed. Blocking stock query.")
+#                             is_safe = False
+#                             break
+#                     if 'select *' in stock_query.lower() or 'select*' in stock_query.lower():
+#                         print("Warning! SELECT * operation not allowed. Blocking stock query.")
+#                         is_safe = False
+
+#                     if is_safe:
+#                         print(f"Executing stock query: {stock_query}")
+#                         sql_cursor.execute(stock_query)
+#                         stock_result = sql_cursor.fetchone()
+                        
+#                         if stock_result:
+#                             item["facts_stock_code"] = stock_result["STKMST_DOCNO"]
+#                             item["facts_stock_desc"] = stock_result["STKMST_DESC"]
+#                         else:
+#                             item["facts_stock_code"] = "NOT FOUND"
+#                             item["facts_stock_desc"] = "NOT FOUND"
+#                     else:
+#                         item["facts_stock_code"] = "BLOCKED FOR SECURITY"
+
+#         except Exception as e:
+#             print(f"Database enrichment failed: {e}")
+#             extracted_data["sql_enrichment_error"] = str(e)
+            
+#         finally:
+#             if sql_conn is not None:
+#                 sql_conn.close()
+#                 print("SQL connection closed.")
+
+# # INSERTING DIRECTLY INTO MONGODB
+#         insert_result = collection.insert_one(extracted_data)
+#         results.append(file.filename) 
+
+#     print("\nAll PDFs processed and uploaded to MongoDB successfully!")
