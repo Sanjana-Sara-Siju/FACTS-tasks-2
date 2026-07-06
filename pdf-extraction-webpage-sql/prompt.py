@@ -13,31 +13,24 @@ The 'party_master' table is for the external party.
    - PARTYMST_DOCNO contains the unique code of the external party.
    - PARTYMST_DESC contains the party details as well as company name.
 
-2. Table: stock_master
-   - Purpose: Master inventory list to use as a fallback if history is empty.
-   - Search Column: STKMST_DESC
-   - STKMST_DOCNO contains the unique code of the item.
-   - STKMST_DESC contains the item details as well as item name.
-
-3. Table: purchase_header
+2. Table: purchase_header
    - Purpose: Stores historical purchase orders.
-   - Columns to use: PUR_DOCNO (matches detail doc number), PUR_SUBLEDGER_DOCNO (matches PARTYMST_DOCNO)
+   - Columns to use: PUR_DOCNO (matches detail doc number), PUR_AC_DOCNO (matches PARTYMST_DOCNO)
 
-4. Table: purchase_details
+3  . Table: purchase_details
    - Purpose: Stores historical items.
    - Columns to use: PURDET_DOCNO (matches header doc no), PURDET_STOCK_DOCNO (item Code), PURDET_STOCK_DESC (item description)
 
 ### YOUR TASK
 1. Extract the PDF data.
 2. Generate the exact SQL SELECT query to find the external party in 'party_master'.
-3. Generate a SQL template to fetch this client's purchase history by joining 'purchase_header' and 'purchase_details' on their document numbers. Select DISTINCT item codes and descriptions. Use the exact string '[PARTY_CODE]' as a placeholder in the WHERE clause for the PUR_AC_DOCNO.
-4. Generate a fallback SQL template to search 'stock_master' for an item. Use the exact string '[ITEM_NAME]' as a placeholder inside the LIKE operator in the WHERE clause. 
-
+3. Generate an SQL query to fetch this client's purchase history by joining 'party_master', 'purchase_header', and 'purchase_details'. Filter the query in the WHERE clause using the extracted external party name (eg: LIKE '%Company Name%'). Select DISTINCT item codes and descriptions. DO NOT use placeholders.
+4. For each extracted item, generate a fallback SQL query that searches only the 'purchase_details' table for that specific item. Select DISTINCT item codes and descriptions. Do not use placeholders, instead inject the simplified item name directly into the LIKE operator.
 
 ### Query Rules:
-- Only generate SELECT queries.
-- Do NOT use SELECT *.
+- Only generate SELECT queries. Do NOT use SELECT *.
 - Keep the WHERE clause simple. Search only using the primary party name or primary item name. Do not combine multiple LIKE conditions with 'AND' (eg: do not combine an item name and a product code).
+- This is IMPORTANT for JOINS: When using the external party name in a LIKE clause, simplify the name to just the first 1 or 2 core words (eg:, use '%KAPICO%' instead of '%KAPICO MIDDLE EAST FZE%'). This makes sure fuzzy matching succeeds.
 - If a name contains a single quote/apostrophe, you must escape it by doubling the quote in the SQL query (eg: O''Connor).
 
 ### REQUIRED OUTPUT SCHEMA:
@@ -46,8 +39,8 @@ You must return a single JSON object containing the following keys. Do not inven
 - "document_number": (String) The PO or invoice number.
 - "external_party_name": (String) The name of the external company.
 - "party_sql_query": (String) The generated SQL query for party_master.
-- "fallback_sql_query": (String) Query to search stock_master. WHERE clause must use '[ITEM_NAME]'.
-- "items": (Array of Objects) Extract exactly what is on the PDF. Include only "item_name" and "quantity".
+- "history_sql_query": (String) The generated SQL query to fetch historical items using a 3 table join based on the party name.
+- "items": (Array of objects) Extract exactly what is on the PDF. Include "item_name", "quantity", and "fallback_sql_query" (The specific query to search purchase_details for this exact item, with no placeholders).
 - "additional_details": (Object) Any other data found, to be included here.
 
 ### Document Text: 
@@ -56,6 +49,13 @@ You must return a single JSON object containing the following keys. Do not inven
 
 #    - Columns to retrieve: PARTYMST_DOCNO (the unique ID), PARTYMST_DESC (the company name)
 #    - Columns to retrieve: STKMST_DOCNO (the unique item ID), STKMST_DESC (the item name)
+
+
+# 2. Table: stock_master
+#    - Purpose: Master inventory list to use as a fallback if history is empty.
+#    - Search Column: STKMST_DESC
+#    - STKMST_DOCNO contains the unique code of the item.
+#    - STKMST_DESC contains the item details as well as item name.
 
 # ----------------------------------------------------------------
 

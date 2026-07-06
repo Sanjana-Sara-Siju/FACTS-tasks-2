@@ -139,14 +139,11 @@ async def extract_data(files: list[UploadFile] = File(...)):
             
             # FUZZY MATCHING (RAG) FOR ITEMS 
             party_code = extracted_data.get("facts_party_code")
-            history_query_template = extracted_data.get("history_sql_query") or extracted_data.get("purchase_history_sql_template", "")
+            history_query = extracted_data.get("history_sql_query", "") 
             
-            # only looking up history if its a valid client 
-            if party_code and party_code not in ["NOT FOUND", "BLOCKED FOR SECURITY"] and history_query_template:
-                print(f"Fetching purchase history for client: {party_code}")
-                
-                # injecting the real data 
-                history_query = history_query_template.replace("[PARTY_CODE]", f"{party_code}")
+            # only looking up history if its a valid client and the query exists
+            if party_code not in ["NOT FOUND", "BLOCKED FOR SECURITY"] and history_query:
+                print(f"Executing history query for client...")
                 
                 # security check on history query
                 is_history_safe = True
@@ -160,70 +157,69 @@ async def extract_data(files: list[UploadFile] = File(...)):
                     history_results = sql_cursor.fetchall()
                     
                     # formatting the data for Mistral 
-                    # Mistral can't read a Python list so this code puts the output into a readable string of text 
                     if history_results:
                         history_text = "\n".join([str(row) for row in history_results])
                     else:
-                        history_text = "No previous purchase history found for this client."
+                        history_text = "No previous purchase history found for this client..."
 
-                    # LINE TO DEBUG:
-                    print(f"\n--- WHAT THE DB FOUND FOR {party_code} ---\n{history_text}\n-----------------------------------\n")
+                    print(f"\n--- WHAT THE DATABASE FOUND IN HISTORY ---\n{history_text}\n-----------------------------------\n")
 
-                    # PDF items
+                    # PDF items mapping
                     items_list = extracted_data.get("items") or []
                     
                     for item in items_list:
                         raw_item_name = item.get("item_name", "")
                         
                         if raw_item_name:
-                            print(f"Fuzzy Matching AI mapping for: '{raw_item_name}'...")
+                            print(f"Fuzzy matching mapping for: '{raw_item_name}'...")
                             
-                            # the new prompt
                             mapping_prompt = ITEM_MAPPING_PROMPT.format(
-                                extracted_item=raw_item_name,
-                                history_list=history_text
+                                extracted_item = raw_item_name,
+                                history_list = history_text
                             )
                             
                             mapping_response = client.chat.complete(
-                                model="mistral-small-latest",
-                                messages=[
+                                model = "mistral-small-latest",
+                                messages = [
                                     {"role": "system", "content": "You strictly output JSON."},
                                     {"role": "user", "content": mapping_prompt}
                                 ],
                                 response_format = {"type": "json_object"}
                             )
                             
-                            # converting Mistral's response back into a Python dict
                             mapped_data = json.loads(mapping_response.choices[0].message.content)
                             item["facts_stock_code"] = mapped_data.get("facts_stock_code", "NOT FOUND")
                             item["facts_stock_desc"] = mapped_data.get("facts_stock_desc", "NOT FOUND")
 
-                            # OPTION 2 --> GOING BACK TO STOCK_MASTER
-                            alt_query_template = extracted_data.get("fallback_sql_query", "")
+                            # GLOBAL HISTORY FALLBACK 
+                            # grabbing the query directly from specific item
+                            fallback_query = item.get("fallback_sql_query", "")
                             
-                            if item["facts_stock_code"] == "NOT FOUND" and alt_query_template:
-                                print(f"Not in history. Executing alternate query for: {raw_item_name}")
+                            if item["facts_stock_code"] == "NOT FOUND" and fallback_query:
+                                print(f"Not in client history (or client link broken). Executing AI specific fallback for: {raw_item_name}")
                                 
-                                # swapping placeholder with the actual item name 
-                                alt_query = alt_query_template.replace("[ITEM_NAME]", raw_item_name)
-                                
-                                # running through security check
-                                is_alt_safe = True
+                                # security check 
+                                is_fallback_safe = True
                                 for word in blocked:
-                                    if word in alt_query.lower():
-                                        is_alt_safe = False
+                                    if word in fallback_query.lower():
+                                        is_fallback_safe = False
                                         break
                                 
-                                if is_alt_safe and 'select *' not in alt_query.lower():
-                                    sql_cursor.execute(alt_query)
-                                    alt_result = sql_cursor.fetchone()
+                                if is_fallback_safe and 'select *' not in fallback_query.lower():
+                                    sql_cursor.execute(fallback_query)
+                                    fallback_result = sql_cursor.fetchone()
                                     
-                                    if alt_result:
-                                        print("Match found in stock_master ..")
-                                        item["facts_stock_code"] = alt_result["STKMST_DOCNO"]
-                                        item["facts_stock_desc"] = alt_result["STKMST_DESC"]
+                                    if fallback_result:
+                                        print("Match found in global purchase_details!")
+                                        
+                                        # trick to grab the first 2 columns regardless of their name
+                                        result_values = list(fallback_result.values())
+                                        if len(result_values) >= 2:
+                                            item["facts_stock_code"] = str(result_values[0])
+                                            item["facts_stock_desc"] = str(result_values[1])
                                     else:
-                                        print("Item not found in history or stock_master.")
+                                        print("Item not found anywhere in historical details.")
+                           
 
         except Exception as e:
             print(f"Database enrichment failed: {e}")
