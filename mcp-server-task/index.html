@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MCP PDF Chatbot</title>
+    <!-- Bootstrap -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Marked.js for clear formatting of responses given by Mistral markdown parsing) -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
+    <style>
+        body {
+            background-color: #f4f6f9;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        /* mobile frame wrapper */
+        .mobile-frame {
+            width: 375px;
+            height: 712px;
+            background-color: #ffffff;
+            border-radius: 32px;
+            box-shadow: 0 12px 28px rgba(0, 0, 0, 0.12);
+            border: 8px solid #212529;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            position: relative;
+        }
+        /* incoming text blocks displayed as chat bubbles */
+        .chat-area {
+            flex-grow: 1;
+            overflow-y: auto;
+            padding: 1rem;
+            background-color: #f8f9fa;
+        }
+        .message-bubble {
+            max-width: 80%;
+            padding: 0.6rem 0.9rem;
+            border-radius: 16px;
+            margin-bottom: 0.75rem;
+            font-size: 0.9rem;
+        }
+        .user-msg {
+            background-color: #0d6efd;
+            color: #fff;
+            align-self: flex-end;
+            margin-left: auto;
+            border-bottom-right-radius: 4px;
+        }
+        .ai-msg {
+            background-color: #e9ecef;
+            color: #212529;
+            align-self: flex-start;
+            border-bottom-left-radius: 4px;
+        }
+        .tool-indicator {
+            font-size: 0.75rem;
+            color: #6c757d;
+            margin-bottom: 0.5rem;
+            text-align: center;
+            font-style: italic;
+        }
+
+        /* styling markdown parsed code blocks inside the AI chat bubbles */
+        .message-bubble pre {
+            background-color: #212529;
+            color: #f8f9fa;
+            padding: 0.5rem;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            overflow-x: auto;
+            margin-top: 0.5rem;
+        }
+        .message-bubble code {
+            font-family: monospace;
+        }
+
+    </style>
+</head>
+<body>
+
+    <div class = "mobile-frame">
+        
+        <div class = "bg-dark text-white p-3 text-center sticky-top">
+            <h6 class = "m-0 fw-bold">PDF CONVERSATIONAL CHATBOT</h6>
+            <span class = "badge bg-success" style = "font-size: 0.65rem;">MCP connected !!</span>
+        </div>
+
+        <div class = "bg-light border-bottom p-2 text-center" style = "font-size: 0.8rem;">
+            <input type = "file" id = "pdfFileInput" accept = ".pdf" class = "form-control form-control-sm mb-1" onchange = "handleFileUpload()">
+            <span class = "text-muted">Document: <span id = "activeDocName">None</span></span>
+        </div>
+
+
+
+        <div class = "chat-area d-flex flex-column" id = "chatWindow">
+            <div class = "message-bubble ai-msg">
+                Server online!! Upload a PDF to ask questions regarding it, or start your query with 'search' to surf the web!
+            </div>
+        </div>
+
+        <div class = "p-2 border-top bg-white">
+            <div class = "input-group input-group-sm">
+                <input type = "text" id = "userMsgInput" class = "form-control rounded-pill-start" placeholder = "Ask PDF or type 'search'..." onkeypress = "handleEnter(event)">
+                <button class = "btn btn-primary rounded-pill-end px-3" type = "button" id = "sendBtn" onclick = "sendChatMessage()">Send</button>
+            </div>
+        </div>
+        
+    </div>
+
+<!-- ------------------------------------------------------------------------- -->
+
+<script>
+    const BACKEND_URL = "";
+    const chatWindow = document.getElementById('chatWindow');
+
+    // handles pressing Enter key 
+    function handleEnter(event) {
+        if (event.key === 'Enter') {
+            sendChatMessage();
+        }
+    }
+
+    async function handleFileUpload() {
+        const fileInput = document.getElementById('pdfFileInput');
+        if (!fileInput.files.length) return;
+
+        const formData = new FormData();
+        formData.append('file', fileInput.files[0]);
+
+        try {
+            // 'fetch' performs a network post call straight to (/upload)
+            // When the server replies with success, the script changes activeDocName to match document's name 
+            const res = await fetch(`${BACKEND_URL}/upload`, { method: 'POST', body: formData });
+            const data = await res.json();
+            
+            if (data.filename) {
+                document.getElementById('activeDocName').innerText = data.filename;
+                document.getElementById('activeDocName').className = "text-primary fw-medium";
+                
+                // alert in chat
+                appendSystemIndicator("File updated securely in server cache.");
+            } else {
+                alert(data.error || "Upload failed..");
+            }
+        } catch (err) {
+            console.error(err);
+            alert("Error connecting to backend engine.", "ai-msg");
+        }
+    }
+
+    async function sendChatMessage() {
+        const inputElement = document.getElementById('userMsgInput');
+        const sendBtn = document.getElementById('sendBtn');
+        // trim --> captures wtv was typed into message prompt box
+        const messageText = inputElement.value.trim(); 
+
+
+        if (!messageText) return;
+
+        appendMessageBubble(messageText, 'user-msg');
+        inputElement.value = '';
+
+        try {
+            // fetch from backend route 
+            // converts prompt text into a raw JSON object string and shoots directly into the FastAPI chat processing route
+            const response = await fetch(`${BACKEND_URL}/chat`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message: messageText, name: "Sanjana" })
+            });
+            const data = await response.json();
+
+            // displaying tool usage if Mistral decided to use one
+            if (data.tool && data.tool !== "None") {
+                appendSystemIndicator(`Mistral AI called tool: \`${data.tool}\``);
+            }
+
+            // displaying final response 
+            appendMessageBubble(data.response || data.error, 'ai-msg');
+
+        } catch (error) {
+            console.error(error);
+            appendMessageBubble("Connection Error: Make sure the app.py script is actively running.", 'ai-msg');
+        }
+    }
+
+
+
+    function appendMessageBubble(text, className) {
+        const bubble = document.createElement('div');
+        bubble.className = `message-bubble ${className}`;
+        // if its an AI msg, parse the markdown into HTML elements
+        if (className === 'ai-msg') {
+            bubble.innerHTML = marked.parse(text);
+        } else {
+            // keep user msgs as standard plain text 
+            bubble.innerText = text;
+        }
+        
+        chatWindow.appendChild(bubble);
+        chatWindow.scrollTop = chatWindow.scrollHeight;
+    }
+
+
+    function appendSystemIndicator(text) {
+        const indicator = document.createElement('div');
+        indicator.className = 'tool-indicator';
+        indicator.innerHTML = text;
+        chatWindow.appendChild(indicator);
+        chatWindow.scrollTop = chatWindow.scrollHeight;
+    }
+</script>
+</body>
+</html>
+
+
+
+
